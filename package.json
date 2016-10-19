@@ -1,0 +1,21 @@
+{
+  "name": "hash-request-cache",
+  "version": "1.0.0",
+  "description": "Hash requests then caches... duh",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha test.js"
+  },
+  "author": "Richard Domingo",
+  "license": "ISC",
+  "dependencies": {
+    "cacheman-mongo": "^1.0.3",
+    "xxhash": "^0.2.4",
+    "bluebird": "^3.4.6"
+  },
+  "devDependencies": {
+    "body-parser": "^1.15.2",
+    "express": "^4.14.0",
+    "superagent": "^2.3.0"
+  }
+}
