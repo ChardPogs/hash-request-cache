@@ -1,16 +1,27 @@
 const DEFAULT_TTL = 60;
 
-function hashRequestCache(cachemanMongoOpts, hashOpts, routes) {
+function hashRequestCache(cachemanOpts, hashOpts, routes) {
   var self = this || {};
-  if(!cachemanMongoOpts || !hashOpts || !routes || !routes.length)
-    throw Error("cachemanMongoOpts and routes required!");
-  var cache = self._cache = new CachemanMongo(cachemanMongoOpts);
-  var get = Promise.promisify(cache.get, {context: cache});
-  var _set = Promise.promisify(cache.set, {context: cache});
-  function set() {
-    var args = Array.prototype.slice.call(arguments);
-    args.push(DEFAULT_TTL);
-    return _set.apply(undefined, args);
+  if(!cachemanOpts || !hashOpts || !routes || !routes.length)
+    throw Error("cachemanOpts and routes required!");
+  var cache = self._cache = new Cacheman(cachemanOpts);
+  function get(key) {
+    key = key.toString();
+    var defer = Promise.defer();
+    cache.get(key, function(err, value) {
+      if(err) defer.reject(err);
+      defer.resolve(value);
+    })
+    return defer.promise;
+  }
+  function set(key, value) {
+    key = key.toString();
+    var defer = Promise.defer();
+    cache.set(key, value, DEFAULT_TTL, function(err, value) {
+      if(err) defer.reject(err);
+      defer.resolve(value);
+    })
+    return defer.promise;
   }
   
   function wait(hashValue) {
@@ -22,7 +33,7 @@ function hashRequestCache(cachemanMongoOpts, hashOpts, routes) {
           throw Error("Wait waited for 60 sec ++");
         value = yield get(`${hashValue}:status`);
         if(value === "__waiting__"){
-          yield Promise.defer(1000);
+          yield Promise.delay(1000);
           waitedFor++;
           continue;
         }
@@ -64,25 +75,34 @@ function hashRequestCache(cachemanMongoOpts, hashOpts, routes) {
       
     var _send = res.send;
     res.send = function(responseBody) {
+      //weirdly, twice tinatawag ung send ni express..
+      if(this.__sendIsCalled) return _send.call(res, responseBody);
+      this.__sendIsCalled = true;
       return Promise.coroutine(function *() {
         var cached = yield get(`${req["HRS:hashValue"]}`);
-        if(!cached){
+        if(cached == undefined){
           yield set(`${req["HRS:hashValue"]}:status`, true);
           yield set(`${req["HRS:hashValue"]}`, responseBody);
+          cached = responseBody;
         }
-        return _send(responseBody);
+        return _send.call(res, cached);
       })();
     }
     
     return Promise.coroutine(function *() {
       var hash = _getHash(req);
       var hashValue = req["HRS:hashValue"] = yield hash.promise;
+      var valueWaiting = yield get(`${hashValue}:status`);
+      if(valueWaiting == undefined){
+        yield set(`${hashValue}:status`, "__waiting__");
+        return next();
+      }
       var isSuccess = yield wait(hashValue);
       var value = yield get(hashValue);
       if(isSuccess){
-        return _send(value);
+        return _send.call(res, value);
       }else{
-        //dapat buuin ulit yung error dito eh. Malamang di gumagana yung serializer ng error ni CachemanMongo
+        //dapat buuin ulit yung error dito eh. Malamang di gumagana yung serializer ng error ni Cacheman
         next(value);
       }
     })()
@@ -113,7 +133,7 @@ function hashRequestCache(cachemanMongoOpts, hashOpts, routes) {
 
 module.exports = hashRequestCache;
 
-var XXHASH = require("xxhash")
-  , CachemanMongo = require("cacheman-mongo")
+var XXHASH = require("xxhashjs").h32
+  , Cacheman = require("cacheman-memory")
   , Promise = require("bluebird")
   ;
